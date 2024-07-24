@@ -211,6 +211,8 @@ WHERE avail_balance > ANY (SELECT a.avail_balance
  ON a.cust_id = i.cust_id
  WHERE i.fname = 'Frank' AND i.lname = 'Tucker'); 
 
+/* To identify the ID of the Woburn branch and the IDs
+ of all bank tellers, and show all accounts associated with them*/
 SELECT account_id, product_cd, cust_id
 FROM account
 WHERE (open_branch_id, open_emp_id) IN
@@ -258,7 +260,13 @@ WHERE NOT EXISTS (SELECT 1
  FROM business b
  WHERE b.cust_id = a.cust_id);
 
-
+/* an example of a correlated
+ subquery used to modify the last_activity_date column in the account table.
+  The subquery
+ in the set clause, however, executes only if the condition in the update statement’s
+ where clause evaluates to true (meaning that at least one transaction was found for the
+ account), thus protecting the data in the last_activity_date column from being over
+written with a null.*/
 UPDATE account a
  SET a.last_activity_date =
  (SELECT MAX(t.txn_date)
@@ -268,7 +276,9 @@ UPDATE account a
   FROM transaction t
   WHERE t.account_id = a.account_id);
 
-  /* Subquery as data source */  
+  /* Subquery as data source 
+  a subquery generates a list of department IDs along with the number
+ of employees assigned to each department.*/  
 SELECT d.dept_id, d.name, e_cnt.how_many num_employees
 FROM department d INNER JOIN
 (SELECT dept_id, COUNT(*) how_many
@@ -276,6 +286,8 @@ FROM department d INNER JOIN
  GROUP BY dept_id) e_cnt
  ON d.dept_id = e_cnt.dept_id;
  
+ /* This query sums all deposit account balances by account type, the employee that
+ opened the accounts, and the branches at which the accounts were opened.*/
  SELECT p.name product, b.name branch,
 CONCAT(e.fname, ' ', e.lname) name,
 account_groups.tot_deposits
@@ -295,6 +307,25 @@ account_groups.tot_deposits
 SELECT 'Average Joes' name, 5000 low_limit, 9999.99 high_limit
  UNION ALL
  SELECT 'Heavy Hitters' name, 10000 low_limit, 9999999.99 high_limit; 
+
+SELECT bal_groups.name, COUNT(*) num_customers
+FROM
+	(SELECT SUM(a.avail_balance) cust_balance
+		FROM account a INNER JOIN product p
+		  ON a.product_cd = p.product_cd
+		WHERE p.product_type_cd = 'ACCOUNT'
+		GROUP BY a.cust_id) cust_rollup
+	 INNER JOIN
+	 (SELECT 'Small Fry' name, 0 low_limit, 4999.99 high_limit
+	   UNION ALL
+	 SELECT 'Average Joes' name, 5000 low_limit,
+	 9999.99 high_limit
+	 UNION ALL
+	 SELECT 'Heavy Hitters' name, 10000 low_limit,
+	 9999999.99 high_limit) bal_groups
+	 ON cust_rollup.cust_balance
+		BETWEEN bal_groups.low_limit AND bal_groups.high_limit
+GROUP BY bal_groups.name;
  
 SELECT ones.num + tens.num + hundreds.num
      FROM
@@ -329,3 +360,45 @@ select * from product;
 
 select * from product_type;
 
+/*The subquery in the having clause finds the maximum number of accounts opened by
+ any employee, and the containing query finds the employee that has opened that num
+ber of accounts. If multiple employees tie for the highest number of opened accounts,
+ then the query would return multiple rows.*/
+SELECT open_emp_id, COUNT(*) how_many
+FROM account 
+GROUP BY open_emp_id
+ HAVING COUNT(*) = (SELECT MAX(emp_cnt.how_many)
+	FROM (SELECT COUNT(*) how_many
+		FROM account
+		GROUP BY open_emp_id) emp_cnt);
+        
+SELECT all_prods.product, all_prods.branch,
+	all_prods.name, all_prods.tot_deposits
+FROM
+	(SELECT
+	 (SELECT p.name FROM product p
+		 WHERE p.product_cd = a.product_cd
+		 AND p.product_type_cd = 'ACCOUNT') product,
+	 (SELECT b.name FROM branch b
+		WHERE b.branch_id = a.open_branch_id) branch,
+	 (SELECT CONCAT(e.fname, ' ', e.lname) FROM employee e
+		WHERE e.emp_id = a.open_emp_id) name,
+		SUM(a.avail_balance) tot_deposits
+ FROM account a
+ GROUP BY a.product_cd, a.open_branch_id, a.open_emp_id
+ ) all_prods
+ WHERE all_prods.product IS NOT NULL
+ ORDER BY 1,2;
+
+/*The following query retrieves employee data sorted by the last name of each employee’s
+ boss, and then by the employee’s last name*/ 
+SELECT emp.emp_id, CONCAT(emp.fname, ' ', emp.lname) emp_name,
+	(SELECT CONCAT(boss.fname, ' ', boss.lname)
+		FROM employee boss
+		WHERE boss.emp_id = emp.superior_emp_id) boss_name
+	FROM employee emp
+	WHERE emp.superior_emp_id IS NOT NULL
+	ORDER BY (SELECT boss.lname FROM employee boss
+		WHERE boss.emp_id = emp.superior_emp_id), emp.lname; 
+        
+        
